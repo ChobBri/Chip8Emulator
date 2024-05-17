@@ -1,5 +1,5 @@
 const ctx = {
-    regs: Array(0xF),
+    regs: new Uint8Array(0xF),
     IReg: 0,
     DTReg: 0,
     STReg: 0,
@@ -9,35 +9,47 @@ const ctx = {
     pc: 0,
     sp: 0,
 
-    memory: Array(0xFFF),
-    stack: Array(0xF)
+    memory: new Uint8Array(0xFFF),
+    stack: new Uint8Array(0xF),
+
+    loaded: false,
 }
 
 function cycle() {
-    instruction = read(0x200 + _pc++)
-
+    if (!ctx.loaded) return
+    instruction = read(0x200 + ctx.pc)
+    ctx.pc += 2
     actionFunc = lookup(instruction)
+    console.log(actionFunc)
     actionFunc()
 }
 
-function loadProgram(fileName) {
-    let fr = new FileReader()
+function loadProgram(arrayBuffer) {
+    const uInt8Arr = new Uint8Array(arrayBuffer)
 
-    fr.readAsArrayBuffer(fileName)
-    fr.onload = () => {
-        let datas = new Int8Array(fr.result)
-        datas.forEach((data, index) => write(0x200 + index, data))
+    uInt8Arr.forEach((byte, index) => {
+        ctx.memory[0x200 + index] = byte
+    })
+
+    const rom = document.getElementById("chip8rom")
+
+    for (let i = 0; i < uInt8Arr.length / 2; i++) {
+        const para = document.createElement("p")
+        const node = document.createTextNode(`0x${(i*2).toString(16)}: ${read(0x200 + 2 * i).toString(16)}`)
+        para.appendChild(node)
+        rom.appendChild(para)
     }
+    ctx.loaded = true
 }
 
 function lookup(instruction) {
     msb = (instruction >>> 8) & 0xFF
     lsb = instruction & 0xFF
 
-    msbu = msb >>> 4 & 0xF
+    msbu = (msb >>> 4) & 0xF
     msbl = msb & 0xF
 
-    lsbu = lsb >>> 4 & 0xF
+    lsbu = (lsb >>> 4) & 0xF
     lsbl = lsb & 0xF
 
     x = msbl
@@ -45,7 +57,7 @@ function lookup(instruction) {
 
     kk = lsb
     n = lsbl
-    nnn = (instruction >> 12) & 0x7FF
+    nnn = instruction & 0x7FF
 
     switch (msbu) {
         case 0x0:
@@ -158,7 +170,7 @@ function pop() {
 }
 
 function read(memAddr) {
-    return ctx.memory[memAddr]
+    return (ctx.memory[memAddr] << 8) | ctx.memory[memAddr + 1]
 }
 
 function write(memAddr, value) {
@@ -168,7 +180,7 @@ function write(memAddr, value) {
 
 /*** Standard Chip-8 Instructions ***/
 function SYSaddr(nnn) {
-    console.log(`SYSaddr invoked! How? nnn = ${nnn.toString(16)}`)
+    // console.log(`SYSaddr invoked! How? nnn = ${nnn.toString(16)}`)
 }
 
 function CLS() {
@@ -190,19 +202,19 @@ function CALLaddr(nnn) {
 
 function SEVxbyte(x, kk) {
     if (ctx.regs[x] === kk) {
-        pc++
+        ctx.pc += 2
     }
 }
 
 function SNEVxbyte(x, kk) {
     if (ctx.regs[x] !== kk) {
-        pc++
+        ctx.pc += 2
     }
 }
 
 function SEVxVy(x, y) {
-    if (ctx.regs[x] === cctx.regs[y]) {
-        pc++
+    if (ctx.regs[x] === ctx.regs[y]) {
+        ctx.pc += 2
     }
 }
 

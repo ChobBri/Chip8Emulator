@@ -1,7 +1,18 @@
-// import { cycle, loadProgram } from "./chip8"
-
 let _canvas = null
 let _frame = 0
+
+let loginForm = document.getElementById("fileSubmitForm")
+loginForm.addEventListener("submit", (e) => {
+    e.preventDefault()
+
+    let file = document.getElementById("file")
+    const reader = new FileReader()
+    reader.onload = (e) => {
+        loadProgram(e.target.result)
+    }
+    reader.readAsArrayBuffer(file.files[0])
+    console.log(file.files[0])
+})
 
 function screenWidth() {
     return 64
@@ -12,6 +23,7 @@ function screenHeight() {
 }
 
 function setup() {
+    frameRate(60)
     width = screenWidth()
     height = screenHeight()
     _canvas = createCanvas(64, 32)
@@ -21,12 +33,11 @@ function setup() {
     _canvas.canvas.style.width = `${_canvas.width * 8}px`
     _canvas.canvas.style.height = `${_canvas.height * 8}px`
     _canvas.canvas.style.imageRendering = "pixelated"
-
-    loadProgram("slipperyslope.ch8")
 }
 
 function draw() {
     background(125)
+
     cycle()
     let width = screenWidth()
     let height = screenHeight()
