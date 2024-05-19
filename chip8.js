@@ -1,5 +1,7 @@
 let _canvas = null
-let _frame = 0
+
+const offColor = [0, 0, 0]
+const onColor = [255, 255, 255]
 
 let loginForm = document.getElementById("fileSubmitForm")
 loginForm.addEventListener("submit", (e) => {
@@ -11,21 +13,10 @@ loginForm.addEventListener("submit", (e) => {
         loadProgram(e.target.result)
     }
     reader.readAsArrayBuffer(file.files[0])
-    console.log(file.files[0])
 })
 
-function screenWidth() {
-    return 64
-}
-
-function screenHeight() {
-    return 32
-}
-
 function setup() {
-    frameRate(120)
-    width = screenWidth()
-    height = screenHeight()
+    frameRate(60)
     _canvas = createCanvas(64, 32)
     pixelDensity(1)
 
@@ -36,40 +27,34 @@ function setup() {
 }
 
 function draw() {
-
-    cycle()
-
-    // let width = screenWidth()
-    // let height = screenHeight()
-    // loadPixels()
-    // for (let row = 0; row < height; row++) {
-    //     for (let col = 0; col < width; col++) {
-    //       let index = 4 * (row * width + col)
-
-    //       // (R, G, B, A)
-    //       pixels[index] = 125 + width + _frame % 255
-    //       pixels[index + 1] = (row * col + _frame) % 255
-    //       pixels[index + 2] = (row + col + _frame % 255) * (row + col + _frame % 255) % 255
-    //       pixels[index + 3] = 255
-    //     }
-    //   }
-    // updatePixels()
-    // _frame++
+    if (!ctx.loaded) return
+    for (let i = 0; i < 60; i++) {
+        cycle()
+    }
+    ctx.DTReg--
+    ctx.STReg--
+    if (ctx.STReg > 0) {
+        osc.freq(400)
+        osc.amp(0.2)
+    }
+    else {
+        osc.amp(0)
+    }
+    console.log(`dt: ${ctx.DTReg}`)
+    console.log(`st: ${ctx.STReg}`)
 }
 
 const ctx = {
-    regs: new Uint8Array(0xF),
+    regs: new Uint8Array(0x10),
     IReg: 0x0,
     DTReg: 0x0,
     STReg: 0x0,
 
-    FReg: 0x0,  // unused
-    
     pc: 0x200,
     sp: 0x0,
 
-    memory: new Uint8Array(0xFFF),
-    stack: new Uint16Array(0xF),
+    memory: new Uint8Array(0x1000),
+    stack: new Uint16Array(0x10),
 
     loaded: false,
 }
@@ -79,22 +64,33 @@ function cycle() {
     instruction = read16(ctx.pc)
     ctx.pc += 2
     actionFunc = lookup(instruction)
-    console.log(`${ctx.pc.toString(16)} : ${actionFunc}`)
+    console.log(`${(ctx.pc - 2).toString(16)} : ${actionFunc}`)
     actionFunc()
 }
 
+function resetCtx() {
+    ctx.regs = new Uint8Array(0x10)
+    ctx.IReg = 0x0
+    ctx.DTReg = 0x0
+    ctx.STReg = 0x0
+
+    ctx.pc = 0x200
+    ctx.sp = 0x0
+
+    ctx.memory = new Uint8Array(0x1000)
+    ctx.stack = new Uint16Array(0x10)
+    ctx.loaded = false
+}
+
+let osc
 function loadProgram(arrayBuffer) {
     const uInt8Arr = new Uint8Array(arrayBuffer)
+    const rom = document.getElementById("chip8rom")
 
-    ctx.memory.forEach((_, index) => {
-        ctx.memory[index] = 0x0
-    })
-
+    resetCtx()
     uInt8Arr.forEach((byte, index) => {
         ctx.memory[0x200 + index] = byte
     })
-
-    const rom = document.getElementById("chip8rom")
 
     for (let i = 0; i < uInt8Arr.length / 2; i++) {
         const para = document.createElement("p")
@@ -103,6 +99,10 @@ function loadProgram(arrayBuffer) {
         para.appendChild(node)
         rom.appendChild(para)
     }
+
+    osc = new SinOsc()
+    osc.amp(0)
+    osc.start()
 
     loadSprites()
     CLS()
@@ -278,92 +278,109 @@ function write(memAddr, value) {
 
 
 /*** Standard Chip-8 Instructions ***/
+// 0nnn
 function SYSaddr(nnn) {
 }
 
+// 00E0
 function CLS() {
     //clear the display
-    let width = screenWidth()
-    let height = screenHeight()
+    let width = _canvas.width
+    let height = _canvas.height
     loadPixels()
     for (let row = 0; row < height; row++) {
         for (let col = 0; col < width; col++) {
           let index = 4 * (row * width + col)
 
           // (R, G, B, A)
-          pixels[index] = 0
-          pixels[index + 1] = 0
-          pixels[index + 2] = 0
+          pixels[index] = offColor[0]
+          pixels[index + 1] = offColor[1]
+          pixels[index + 2] = offColor[2]
           pixels[index + 3] = 255
         }
       }
     updatePixels()
 }
 
+// 00EE
 function RET() {
     ctx.pc = popStack()
 }
 
+// 1nnn
 function JPaddr(nnn) {
     ctx.pc = nnn
 }
 
+// 2nnn
 function CALLaddr(nnn) {
     pushStack(ctx.pc)
     ctx.pc = nnn
 }
 
+// 3xkk
 function SEVxbyte(x, kk) {
     if (ctx.regs[x] === kk) {
         ctx.pc += 2
     }
 }
 
+// 4xkk
 function SNEVxbyte(x, kk) {
     if (ctx.regs[x] !== kk) {
         ctx.pc += 2
     }
 }
 
+// 5xy0
 function SEVxVy(x, y) {
     if (ctx.regs[x] === ctx.regs[y]) {
         ctx.pc += 2
     }
 }
 
+// 6xkk
 function LDVxbyte(x, kk) {
     ctx.regs[x] = kk
+    console.log(`${x} : ${ctx.regs[x]} : ${kk}`)
 }
 
+// 7xkk
 function ADDVxbyte(x, kk) {
     ctx.regs[x] += kk
 }
 
+// 8xy0
 function LDVxVy(x, y) {
     ctx.regs[x] = ctx.regs[y]
 }
 
+// 8xy1
 function ORVxVy(x, y) {
     ctx.regs[x] |= ctx.regs[y]
 }
 
+// 8xy2
 function ANDVxVy(x, y) {
     ctx.regs[x] &= ctx.regs[y]
 }
 
+// 8xy3
 function XORVxVy(x, y) {
     ctx.regs[x] ^= ctx.regs[y]
 }
 
+// 8xy4
 function ADDVxVy(x, y) {
     result = ctx.regs[x] + ctx.regs[y]
-    ctx.FReg = (result > 255) ? 0x1 : 0x0
+    ctx.regs[0xF] = (result > 255) ? 0x1 : 0x0
     ctx.regs[x] = result & 0xFF
 }
 
+// 8xy5
 function SUBVxVy(x, y) {
     result = ctx.regs[x] - ctx.regs[y]
-    ctx.FReg = (ctx.regs[x] > ctx.regs[y]) ? 0x1 : 0x0
+    ctx.regs[0xF] = (ctx.regs[x] > ctx.regs[y]) ? 0x1 : 0x0
     ctx.regs[x] = result
 
     if (ctx.regs[x] < 0) {
@@ -371,14 +388,16 @@ function SUBVxVy(x, y) {
     }
 }
 
+// 8xy6
 function SHRVxVy(x, y) {
-    ctx.FReg = ctx.regs[x] & 0x1
+    ctx.regs[0xF] = ctx.regs[x] & 0x1
     ctx.regs[x] >>>= 1
 }
 
+// 8xy7
 function SUBNVxVy(x, y) {
     result = ctx.regs[y] - ctx.regs[x]
-    ctx.FReg = (ctx.regs[y] > ctx.regs[x]) ? 0x1 : 0x0
+    ctx.regs[0xF] = (ctx.regs[y] > ctx.regs[x]) ? 0x1 : 0x0
     ctx.regs[x] = result
 
     if (ctx.regs[x] < 0) {
@@ -386,57 +405,73 @@ function SUBNVxVy(x, y) {
     }
 }
 
+// 8xyE
 function SHLVxVy(x, y) {
-    ctx.FReg = (ctx.regs[x] >>> 0xF) & 0x1
+    ctx.regs[0xF] = (ctx.regs[x] >>> 0xF) & 0x1
     ctx.regs[x] <<= 1
     ctx.regs[x] &= 0xFF
 }
 
+// 9xy0
 function SNEVxVy(x, y) {
     if (ctx.regs[x] !== ctx.regs[y]) {
-        pc++
+        ctx.pc++
     }
 }
 
+// Annn
 function LDIaddr(nnn) {
     ctx.IReg = nnn
 }
 
+// Bnnn
 function JPV0addr(nnn) {
     ctx.pc = nnn + ctx.regs[0]
 }
 
+// Cxkk
 function RNDVxbyte(x, kk) {
     ctx.regs[x] = Math.floor(Math.random() * 256) & kk
 }
 
+// Dxyn
 function DRWVxVynibble(x, y, n) {
     // display n-byte sprite starting
     // at memory location I at (Vx, Vy),
     // set VF = collision
-    let width = screenWidth()
-    let height = screenHeight()
+    let width = _canvas.width
+    let height = _canvas.height
     loadPixels()
     const startRow = ctx.regs[y]
     const startCol = ctx.regs[x]
+    console.log(`Draw at (${startCol}, ${startRow}) for ${n} bytes}`)
     for (let row = startRow, byteIndex = 0; row < startRow + n; row++, byteIndex++) {
         spriteByte = read(ctx.IReg + byteIndex)
         for (let col = startCol, bitIndex = 0; col < startCol + 8; col++, bitIndex++) {
-            let index = 4 * (row * width + col)
+            let index = 4 * ((row % 32) * width + (col % 64))
 
             const bit = (spriteByte >>> (7 - bitIndex)) & 0x1
             
-            const color = bit === 0x1 ? 255 : 0
+            const currentBit = (pixels[index] === onColor[0] &&
+                                pixels[index + 1] === onColor[1] &&
+                                pixels[index + 2] === onColor[2])
+                                ? 0x1 : 0x0
+            if (bit === 0x1 && currentBit === bit) {
+                ctx.regs[0xF] = 0x1
+            }
+            const newColor = (bit ^ currentBit) === 0x1 ? onColor : offColor
+            
             // (R, G, B, A)
-            pixels[index] = color
-            pixels[index + 1] = color
-            pixels[index + 2] = color
-            pixels[index + 3] = 255
+            pixels[index] = newColor[0]
+            pixels[index + 1] = newColor[1]    
+            pixels[index + 2] = newColor[2]
+            pixels[index + 3] = 0xFF
         }
       }
     updatePixels()
 }
 
+// Ex9E
 function SKPVx(x) {
     // Skip next instruction if key with the value of Vx is pressed
     currentKey = getCurrentKey()
@@ -446,6 +481,7 @@ function SKPVx(x) {
     }
 }
 
+// ExA1
 function SKNPVx(x) {
     // Skip next instruction if key with the value of Vx is not pressed
     currentKey = getCurrentKey()
@@ -455,10 +491,12 @@ function SKNPVx(x) {
     }
 }
 
+// Fx07
 function LDVxDT(x) {
     ctx.regs[x] = ctx.DTReg
 }
 
+// Fx0A
 function LDVxK(x) {
     // Wait for a key press, store the value of the key in Vx
     currentKey = getCurrentKey()
@@ -469,23 +507,29 @@ function LDVxK(x) {
     }
 }
 
+// Fx15
 function LDDTVx(x) {
     ctx.DTReg = ctx.regs[x]
+    console.log(`${x} : ${ctx.DTReg} : ${ctx.regs[x]}`)
 }
 
+// Fx18
 function LDSTVx(x) {
     ctx.STReg = ctx.regs[x]
 }
 
+// Fx1E
 function ADDIVx(x) {
     ctx.IReg += ctx.regs[x]
 }
 
+// Fx29
 function LDFVx(x) {
     // set I = location sprite for digit Vx
     ctx.IReg = ctx.regs[x] * 5
 }
 
+// Fx33
 function LDBVx(x) {
     num = ctx.regs[x]
     hundreds = Math.floor(num / 100) % 10
@@ -497,15 +541,17 @@ function LDBVx(x) {
     write(ctx.IReg + 2, ones)
 }
 
+// Fx55
 function LDIVx(x) {
     for (let i = 0; i <= x; i++) {
         write(ctx.IReg + i, ctx.regs[i])
     }
 }
 
+// Fx65
 function LDVxI(x) {
     for (let i = 0; i <= x; i++) {
-        ctx.regs[i] = read16(ctx.IReg + i)
+        ctx.regs[i] = read(ctx.IReg + i)
     }
 }
 
