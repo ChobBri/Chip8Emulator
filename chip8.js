@@ -3,6 +3,24 @@ let _canvas = null
 const offColor = [0, 0, 0]
 const onColor = [255, 255, 255]
 
+const ctx = {
+    regs: new Uint8Array(0x10),
+    IReg: 0x0,
+    DTReg: 0x0,
+    STReg: 0x0,
+
+    pc: 0x200,
+    sp: 0x0,
+
+    memory: new Uint8Array(0x1000),
+    stack: new Uint16Array(0x10),
+
+    loaded: false,
+    keyboard: new Array(16).fill(false)
+}
+
+let osc
+
 let loginForm = document.getElementById("fileSubmitForm")
 loginForm.addEventListener("submit", (e) => {
     e.preventDefault()
@@ -28,35 +46,17 @@ function setup() {
 
 function draw() {
     if (!ctx.loaded) return
-    for (let i = 0; i < 60; i++) {
+    for (let i = 0; i < 30; i++) {
         cycle()
     }
     ctx.DTReg--
     ctx.STReg--
     if (ctx.STReg > 0) {
-        osc.freq(400)
         osc.amp(0.2)
     }
     else {
         osc.amp(0)
     }
-    console.log(`dt: ${ctx.DTReg}`)
-    console.log(`st: ${ctx.STReg}`)
-}
-
-const ctx = {
-    regs: new Uint8Array(0x10),
-    IReg: 0x0,
-    DTReg: 0x0,
-    STReg: 0x0,
-
-    pc: 0x200,
-    sp: 0x0,
-
-    memory: new Uint8Array(0x1000),
-    stack: new Uint16Array(0x10),
-
-    loaded: false,
 }
 
 function cycle() {
@@ -64,7 +64,7 @@ function cycle() {
     instruction = read16(ctx.pc)
     ctx.pc += 2
     actionFunc = lookup(instruction)
-    console.log(`${(ctx.pc - 2).toString(16)} : ${actionFunc}`)
+    // console.log(`${(ctx.pc - 2).toString(16)} : ${actionFunc}`)
     actionFunc()
 }
 
@@ -80,9 +80,9 @@ function resetCtx() {
     ctx.memory = new Uint8Array(0x1000)
     ctx.stack = new Uint16Array(0x10)
     ctx.loaded = false
+    ctx.keyboard = new Array(16).fill(false)
 }
 
-let osc
 function loadProgram(arrayBuffer) {
     const uInt8Arr = new Uint8Array(arrayBuffer)
     const rom = document.getElementById("chip8rom")
@@ -197,8 +197,6 @@ function lookup(instruction) {
                     return () => { SHRVxVy(x, y) }
                 case 0x7:
                     return () => { SUBNVxVy(x, y) }
-                case 0x8:
-                    return () => { SHLVxVy(x, y) }
                 case 0xE:
                     return () => { SHLVxVy(x, y) }
                 default:
@@ -342,7 +340,6 @@ function SEVxVy(x, y) {
 // 6xkk
 function LDVxbyte(x, kk) {
     ctx.regs[x] = kk
-    console.log(`${x} : ${ctx.regs[x]} : ${kk}`)
 }
 
 // 7xkk
@@ -372,50 +369,54 @@ function XORVxVy(x, y) {
 
 // 8xy4
 function ADDVxVy(x, y) {
-    result = ctx.regs[x] + ctx.regs[y]
-    ctx.regs[0xF] = (result > 255) ? 0x1 : 0x0
+    const result = ctx.regs[x] + ctx.regs[y]
     ctx.regs[x] = result & 0xFF
+    ctx.regs[0xF] = (result > 255) ? 0x1 : 0x0
 }
 
 // 8xy5
 function SUBVxVy(x, y) {
-    result = ctx.regs[x] - ctx.regs[y]
-    ctx.regs[0xF] = (ctx.regs[x] > ctx.regs[y]) ? 0x1 : 0x0
+    const result = ctx.regs[x] - ctx.regs[y]
     ctx.regs[x] = result
 
     if (ctx.regs[x] < 0) {
         ctx.regs[x] += 0x100
     }
+
+    ctx.regs[0xF] = (result >= 0) ? 0x1 : 0x0
 }
 
 // 8xy6
 function SHRVxVy(x, y) {
-    ctx.regs[0xF] = ctx.regs[x] & 0x1
+    ctx.regs[x] = ctx.regs[y]
+    const flag = ctx.regs[x] & 0x1
     ctx.regs[x] >>>= 1
+    ctx.regs[0xF] = flag
 }
 
 // 8xy7
 function SUBNVxVy(x, y) {
     result = ctx.regs[y] - ctx.regs[x]
-    ctx.regs[0xF] = (ctx.regs[y] > ctx.regs[x]) ? 0x1 : 0x0
     ctx.regs[x] = result
 
     if (ctx.regs[x] < 0) {
         ctx.regs[x] += 0x100
     }
+    ctx.regs[0xF] = (result >= 0) ? 0x1 : 0x0
 }
 
 // 8xyE
 function SHLVxVy(x, y) {
-    ctx.regs[0xF] = (ctx.regs[x] >>> 0xF) & 0x1
+    const flag = (ctx.regs[x] >>> 0x7) & 0x1
     ctx.regs[x] <<= 1
     ctx.regs[x] &= 0xFF
+    ctx.regs[0xF] = (flag & 0xFF)
 }
 
 // 9xy0
 function SNEVxVy(x, y) {
     if (ctx.regs[x] !== ctx.regs[y]) {
-        ctx.pc++
+        ctx.pc += 2
     }
 }
 
@@ -444,7 +445,7 @@ function DRWVxVynibble(x, y, n) {
     loadPixels()
     const startRow = ctx.regs[y]
     const startCol = ctx.regs[x]
-    console.log(`Draw at (${startCol}, ${startRow}) for ${n} bytes}`)
+    let flag = 0x0
     for (let row = startRow, byteIndex = 0; row < startRow + n; row++, byteIndex++) {
         spriteByte = read(ctx.IReg + byteIndex)
         for (let col = startCol, bitIndex = 0; col < startCol + 8; col++, bitIndex++) {
@@ -457,7 +458,7 @@ function DRWVxVynibble(x, y, n) {
                                 pixels[index + 2] === onColor[2])
                                 ? 0x1 : 0x0
             if (bit === 0x1 && currentBit === bit) {
-                ctx.regs[0xF] = 0x1
+                flag = 0x1
             }
             const newColor = (bit ^ currentBit) === 0x1 ? onColor : offColor
             
@@ -467,16 +468,16 @@ function DRWVxVynibble(x, y, n) {
             pixels[index + 2] = newColor[2]
             pixels[index + 3] = 0xFF
         }
-      }
+    }
+    ctx.regs[0xF] = flag
+
     updatePixels()
 }
 
 // Ex9E
 function SKPVx(x) {
     // Skip next instruction if key with the value of Vx is pressed
-    currentKey = getCurrentKey()
-
-    if (currentKey === ctx.regs[x]) {
+    if (ctx.keyboard[ctx.regs[x]]) {
         ctx.pc += 2
     }
 }
@@ -484,9 +485,7 @@ function SKPVx(x) {
 // ExA1
 function SKNPVx(x) {
     // Skip next instruction if key with the value of Vx is not pressed
-    currentKey = getCurrentKey()
-
-    if (currentKey !== ctx.regs[x]) {
+    if (!ctx.keyboard[ctx.regs[x]]) {
         ctx.pc += 2
     }
 }
@@ -510,7 +509,6 @@ function LDVxK(x) {
 // Fx15
 function LDDTVx(x) {
     ctx.DTReg = ctx.regs[x]
-    console.log(`${x} : ${ctx.DTReg} : ${ctx.regs[x]}`)
 }
 
 // Fx18
@@ -607,5 +605,139 @@ function getCurrentKey() {
             return 0xF
         default:
             return undefined
+    }
+}
+
+function keyPressed() {
+    switch (key) {
+        case "1":
+            ctx.keyboard[0x1] = true
+            return
+        case "2":
+            ctx.keyboard[0x2] = true
+            return
+        case "3":
+            ctx.keyboard[0x3] = true
+            return
+        case "4":
+            ctx.keyboard[0xC] = true
+            return
+        case "Q":
+        case "q":
+            ctx.keyboard[0x4] = true
+            return
+        case "W":
+        case "w":
+            ctx.keyboard[0x5] = true
+            return
+        case "E":
+        case "e":
+            ctx.keyboard[0x6] = true
+            return
+        case "R":
+        case "r":
+            ctx.keyboard[0xD] = true
+            return
+        case "A":
+        case "a":
+            ctx.keyboard[0x7] = true
+            return
+        case "S":
+        case "s":
+            ctx.keyboard[0x8] = true
+            return
+        case "D":
+        case "d":
+            ctx.keyboard[0x9] = true
+            return
+        case "F":
+        case "f":
+            ctx.keyboard[0xE] = true
+            return
+        case "Z":
+        case "z":
+            ctx.keyboard[0xA] = true
+            return
+        case "X":
+        case "x":
+            ctx.keyboard[0x0] = true
+            return
+        case "C":
+        case "c":
+            ctx.keyboard[0xB] = true
+            return
+        case "V":
+        case "v":
+            ctx.keyboard[0xF] = true
+            return
+        default:
+            return
+    }
+}
+
+function keyReleased() {
+    switch (key) {
+        case "1":
+            ctx.keyboard[0x1] = false
+            return
+        case "2":
+            ctx.keyboard[0x2] = false
+            return
+        case "3":
+            ctx.keyboard[0x3] = false
+            return
+        case "4":
+            ctx.keyboard[0xC] = false
+            return
+        case "Q":
+        case "q":
+            ctx.keyboard[0x4] = false
+            return
+        case "W":
+        case "w":
+            ctx.keyboard[0x5] = false
+            return
+        case "E":
+        case "e":
+            ctx.keyboard[0x6] = false
+            return
+        case "R":
+        case "r":
+            ctx.keyboard[0xD] = false
+            return
+        case "A":
+        case "a":
+            ctx.keyboard[0x7] = false
+            return
+        case "S":
+        case "s":
+            ctx.keyboard[0x8] = false
+            return
+        case "D":
+        case "d":
+            ctx.keyboard[0x9] = false
+            return
+        case "F":
+        case "f":
+            ctx.keyboard[0xE] = false
+            return
+        case "Z":
+        case "z":
+            ctx.keyboard[0xA] = false
+            return
+        case "X":
+        case "x":
+            ctx.keyboard[0x0] = false
+            return
+        case "C":
+        case "c":
+            ctx.keyboard[0xB] = false
+            return
+        case "V":
+        case "v":
+            ctx.keyboard[0xF] = false
+            return
+        default:
+            return
     }
 }
